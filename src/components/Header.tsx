@@ -254,6 +254,18 @@ export const Header: React.FC<HeaderProps> = ({
           {!deviceConfig?.isLocked && (
             <button
               type="button"
+              onClick={onOpenSystemHealth}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white transition text-xs font-semibold"
+              title="Systeemstatus en diagnostiek"
+            >
+              <Activity className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden lg:inline">Systeemstatus</span>
+            </button>
+          )}
+
+          {!deviceConfig?.isLocked && (
+            <button
+              type="button"
               onClick={onOpenPrint}
               className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white transition text-xs font-semibold"
               title="Startlijsten, startnummers en noodformulieren afdrukken"

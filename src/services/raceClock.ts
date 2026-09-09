@@ -41,5 +41,27 @@ export class RaceClock {
     else this.error = failure;
     return this.status();
   }
+  async syncWithNetwork(source = 'network', sample?: () => Promise<number>) {
+    if (sample) {
+      return this.synchronize(source, sample);
+    }
+    return this.synchronize(source, async () => {
+      if (typeof fetch !== 'undefined') {
+        try {
+          const response = await fetch('https://worldtimeapi.org/api/timezone/Etc/UTC', {
+            signal: AbortSignal.timeout(3000),
+          });
+          if (response.ok) {
+            const data = await response.json();
+            const parsed = new Date(data.utc_datetime).getTime();
+            if (Number.isFinite(parsed) && parsed > 1577836800000) return parsed;
+          }
+        } catch {
+          // fallback to local wall time
+        }
+      }
+      return this.wall();
+    });
+  }
 }
 export const raceClock = new RaceClock();

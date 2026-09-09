@@ -21,6 +21,7 @@ import { PreRaceCheckModal } from './components/PreRaceCheckModal';
 import { PrintModal } from './components/PrintModal';
 import { ConflictResolverModal } from './components/ConflictResolverModal';
 import { ParticipantDetailModal } from './components/ParticipantDetailModal';
+import { SystemHealthModal } from './components/SystemHealthModal';
 
 import type { RaceConflict, Participant, RaceResult } from './types';
 import { AlertTriangle, Lock, Unlock, KeyRound } from 'lucide-react';
@@ -64,6 +65,7 @@ export default function App() {
 
   // Modals state
   const [showPreRaceModal, setShowPreRaceModal] = useState(false);
+  const [showSystemHealthModal, setShowSystemHealthModal] = useState(false);
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [activeConflict, setActiveConflict] = useState<RaceConflict | null>(null);
   const [selectedParticipant, setSelectedParticipant] = useState<Participant | null>(null);
@@ -198,6 +200,7 @@ export default function App() {
           deviceConfig={deviceConfig}
           pendingSyncCount={pendingSyncCount}
           onOpenPreRaceCheck={() => setShowPreRaceModal(true)}
+          onOpenSystemHealth={() => setShowSystemHealthModal(true)}
           onOpenPrint={() => setShowPrintModal(true)}
           onUnlockDevice={handleOpenUnlockModal}
           isTestMode={event?.isTestMode ?? false}
@@ -341,6 +344,12 @@ export default function App() {
         categories={categories}
         waves={waves}
         event={event}
+      />
+
+      <SystemHealthModal
+        isOpen={showSystemHealthModal}
+        onClose={() => setShowSystemHealthModal(false)}
+        deviceConfig={deviceConfig}
       />
 
       <ConflictResolverModal

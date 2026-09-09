@@ -244,7 +244,11 @@ export const SystemHealthModal: React.FC<SystemHealthModalProps> = ({
   const handleSyncClockNow = async () => {
     setSyncingClock(true);
     try {
-      await raceClock.syncWithNetwork();
+      if (syncService.getConfig().enabled) {
+        await syncService.checkClockOffset();
+      } else {
+        await raceClock.syncWithNetwork();
+      }
       soundService.playSuccess();
       await runHealthCheck();
     } catch {
