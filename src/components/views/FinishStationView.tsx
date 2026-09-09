@@ -39,6 +39,9 @@ export const FinishStationView: React.FC<FinishStationViewProps> = ({
   const [capturedTime, setCapturedTime] = useState<{ iso: string; monotonic: number } | null>(null);
   const [feedback, setFeedback] = useState<{ text: string; type: 'success' | 'warn' | 'conflict' } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [undoingRecord, setUndoingRecord] = useState<TimingRecord | null>(null);
+  const [undoReason, setUndoReason] = useState('');
+  const [undoError, setUndoError] = useState<string | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -198,22 +201,35 @@ export const FinishStationView: React.FC<FinishStationViewProps> = ({
   };
 
   // Undo finish with mandatory reason (Req 44)
-  const handleUndoFinish = async (record: TimingRecord) => {
-    const reason = prompt('Reden van annuleren finish (verplicht):');
-    if (!reason || !reason.trim()) return;
+  const handleOpenUndoFinish = (record: TimingRecord) => {
+    setUndoingRecord(record);
+    setUndoReason('');
+    setUndoError(null);
+  };
 
-    await operationService.undoTimingRecord(record.id, reason);
-    const p = participants.find(item => item.bibNumber === record.bibNumber);
+  const handleConfirmUndoFinish = async () => {
+    if (!undoingRecord) return;
+    if (!undoReason.trim()) {
+      soundService.playWarning();
+      setUndoError('Reden van annuleren finish is verplicht (Req 44)');
+      return;
+    }
+
+    await operationService.undoTimingRecord(undoingRecord.id, undoReason.trim());
+    const p = participants.find((item) => item.bibNumber === undoingRecord.bibNumber);
 
     await operationService.logAudit(
       'FINISH_CANCELLED',
-      `Finish voor bib #${record.bibNumber} geannuleerd. Reden: ${reason}`,
+      `Finish voor bib #${undoingRecord.bibNumber} geannuleerd. Reden: ${undoReason.trim()}`,
       p?.id,
-      record.bibNumber,
-      reason
+      undoingRecord.bibNumber,
+      undoReason.trim()
     );
 
     soundService.playWarning();
+    setUndoingRecord(null);
+    setUndoReason('');
+    setUndoError(null);
     onRefresh();
   };
 
@@ -407,7 +423,7 @@ export const FinishStationView: React.FC<FinishStationViewProps> = ({
                       </div>
 
                       <button
-                        onClick={() => handleUndoFinish(rec)}
+                        onClick={() => handleOpenUndoFinish(rec)}
                         className="p-2 rounded-lg bg-slate-750 hover:bg-red-950/60 text-slate-400 hover:text-red-300 border border-slate-700 hover:border-red-600/40 transition"
                         title="Finish ongedaan maken met verplichte reden"
                       >
@@ -467,6 +483,58 @@ export const FinishStationView: React.FC<FinishStationViewProps> = ({
                 className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider shadow transition"
               >
                 Bevestigen (ENTER)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Undo Finish Record Modal */}
+      {undoingRecord && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-slate-750 rounded-2xl p-6 max-w-sm w-full space-y-4 text-white shadow-2xl">
+            <h3 className="text-base font-bold text-amber-400">Finishtijd Annuleren (Undo)</h3>
+            <p className="text-xs text-slate-300">
+              U staat op het punt de finishregistratie voor <strong className="text-white font-mono">Bib #{undoingRecord.bibNumber}</strong> te annuleren.
+            </p>
+
+            {undoError && (
+              <div className="p-2.5 rounded-lg bg-red-950/60 border border-red-800/60 text-red-300 text-xs font-semibold">
+                {undoError}
+              </div>
+            )}
+
+            <div>
+              <label className="text-xs text-slate-300 block mb-1">
+                Verplichte reden van annulering:
+              </label>
+              <input
+                type="text"
+                autoFocus
+                value={undoReason}
+                onChange={(e) => setUndoReason(e.target.value)}
+                placeholder="bv. Verkeerd startnummer ingetikt"
+                className="w-full bg-slate-850 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
+              />
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setUndoingRecord(null);
+                  setUndoError(null);
+                }}
+                className="flex-1 py-2 rounded-xl bg-slate-800 text-slate-400 text-xs font-bold"
+              >
+                Annuleren
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmUndoFinish}
+                className="flex-1 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold"
+              >
+                Bevestig Annulering
               </button>
             </div>
           </div>

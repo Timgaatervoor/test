@@ -10,6 +10,7 @@ import {
   Smartphone,
   ShieldCheck,
   Terminal,
+  AlertTriangle,
 } from 'lucide-react';
 import { usePWAInstall } from '../hooks/usePWAInstall';
 import { createFullSnapshot, downloadJsonFile } from '../services/backupService';
@@ -29,12 +30,14 @@ export const InstallDesktopModal: React.FC<InstallDesktopModalProps> = ({
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [downloadingBackup, setDownloadingBackup] = useState(false);
   const [backupSuccess, setBackupSuccess] = useState(false);
+  const [backupError, setBackupError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
   const handleQuickBackup = async () => {
     if (!event) return;
     setDownloadingBackup(true);
+    setBackupError(null);
     try {
       const snap = await createFullSnapshot(event);
       downloadJsonFile(
@@ -44,7 +47,7 @@ export const InstallDesktopModal: React.FC<InstallDesktopModalProps> = ({
       setBackupSuccess(true);
       setTimeout(() => setBackupSuccess(false), 4000);
     } catch (e: any) {
-      alert(`Fout bij opslaan: ${e?.message}`);
+      setBackupError(`Fout bij opslaan: ${e?.message}`);
     } finally {
       setDownloadingBackup(false);
     }
@@ -223,6 +226,13 @@ export const InstallDesktopModal: React.FC<InstallDesktopModalProps> = ({
             <div className="p-3 rounded-xl bg-emerald-950/50 border border-emerald-500/40 text-emerald-300 text-xs flex items-center gap-2 font-semibold">
               <CheckCircle2 className="w-4 h-4" />
               <span>Back-up bestand succesvol opgeslagen op uw computer!</span>
+            </div>
+          )}
+
+          {backupError && (
+            <div className="p-3 rounded-xl bg-red-950/50 border border-red-500/40 text-red-300 text-xs flex items-center gap-2 font-semibold">
+              <AlertTriangle className="w-4 h-4" />
+              <span>{backupError}</span>
             </div>
           )}
         </div>

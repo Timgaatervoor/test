@@ -8,16 +8,30 @@ import {
   Medal,
   Tv,
   Lock,
+  Unlock,
   Download,
   Share2,
   Crosshair,
   Flag,
   Settings,
   Clock,
+  Sun,
+  Moon,
+  Shield,
+  KeyRound,
+  Play,
+  Pause,
+  ChevronLeft,
+  ChevronRight,
+  Activity,
+  Users,
+  AlertTriangle,
 } from 'lucide-react';
 import type { RaceResult, Category, Wave, RaceEvent, ParticipantStatus } from '../../types';
 import { formatDuration } from '../../services/timingEngine';
 import { downloadCsvFile } from '../../services/backupService';
+import { soundService } from '../../services/soundService';
+import { SafeConfirmButton } from '../SafeConfirmButton';
 
 interface LiveLeaderboardViewProps {
   results: RaceResult[];
@@ -35,7 +49,11 @@ interface TvKioskConfig {
   rotateCategories: boolean;
   categoryIds: string[];
   rotationSeconds: number;
-  textScale: 'normal' | 'large' | 'extra-large';
+  textScale: 'normal' | 'large' | 'extra-large' | 'jumbo-tv';
+  theme: 'dark' | 'daylight';
+  pageSize: number;
+  autoPaginate: boolean;
+  kioskPin?: string;
 }
 
 const defaultTvKioskConfig: TvKioskConfig = {
@@ -45,6 +63,10 @@ const defaultTvKioskConfig: TvKioskConfig = {
   categoryIds: [],
   rotationSeconds: 15,
   textScale: 'large',
+  theme: 'dark',
+  pageSize: 12,
+  autoPaginate: true,
+  kioskPin: '',
 };
 
 export const LiveLeaderboardView: React.FC<LiveLeaderboardViewProps> = ({
@@ -68,6 +90,13 @@ export const LiveLeaderboardView: React.FC<LiveLeaderboardViewProps> = ({
   const [isKioskMode, setIsKioskMode] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState(() => new Date(raceClock.nowMs()));
   const [showKioskSettings, setShowKioskSettings] = useState(false);
+  const [currentPage, setCurrentPage] = useState(0);
+  const [rotationSecondsLeft, setRotationSecondsLeft] = useState(15);
+  const [isRotationPaused, setIsRotationPaused] = useState(false);
+  const [showExitPinModal, setShowExitPinModal] = useState(false);
+  const [exitPinInput, setExitPinInput] = useState('');
+  const [exitPinError, setExitPinError] = useState<string | null>(null);
+
   const [tvConfig, setTvConfig] = useState<TvKioskConfig>(() => {
     try {
       const storedConfig = JSON.parse(localStorage.getItem(kioskStorageKey) || '{}');
@@ -76,9 +105,13 @@ export const LiveLeaderboardView: React.FC<LiveLeaderboardViewProps> = ({
         showPodium: storedConfig.showPodium !== false,
         showClock: storedConfig.showClock !== false,
         rotateCategories: storedConfig.rotateCategories === true,
-        rotationSeconds: [10, 15, 30, 60].includes(storedConfig.rotationSeconds) ? storedConfig.rotationSeconds : 15,
+        rotationSeconds: [10, 15, 20, 30, 60].includes(storedConfig.rotationSeconds) ? storedConfig.rotationSeconds : 15,
         categoryIds: Array.isArray(storedConfig.categoryIds) ? storedConfig.categoryIds : [],
-        textScale: ['normal', 'large', 'extra-large'].includes(storedConfig.textScale) ? storedConfig.textScale : defaultTvKioskConfig.textScale,
+        textScale: ['normal', 'large', 'extra-large', 'jumbo-tv'].includes(storedConfig.textScale) ? storedConfig.textScale : defaultTvKioskConfig.textScale,
+        theme: storedConfig.theme === 'daylight' ? 'daylight' : 'dark',
+        pageSize: typeof storedConfig.pageSize === 'number' ? storedConfig.pageSize : 12,
+        autoPaginate: storedConfig.autoPaginate !== false,
+        kioskPin: typeof storedConfig.kioskPin === 'string' ? storedConfig.kioskPin : '',
       };
     } catch {
       return defaultTvKioskConfig;
@@ -102,53 +135,64 @@ export const LiveLeaderboardView: React.FC<LiveLeaderboardViewProps> = ({
 
   useEffect(() => {
     const handleFullscreenChange = () => {
-      if (!document.fullscreenElement) { setIsKioskMode(false); setShowKioskSettings(false); }
+      if (!document.fullscreenElement && isKioskMode && !tvConfig.kioskPin) {
+        setIsKioskMode(false);
+        setShowKioskSettings(false);
+      }
     };
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, []);
+  }, [isKioskMode, tvConfig.kioskPin]);
 
   useEffect(() => {
-    const escape = (e: KeyboardEvent) => { if (e.key === 'Escape' && !document.fullscreenElement) { setIsKioskMode(false); setShowKioskSettings(false); } };
+    const escape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isKioskMode) {
+        if (tvConfig.kioskPin && tvConfig.kioskPin.trim()) {
+          setExitPinInput('');
+          setExitPinError(null);
+          setShowExitPinModal(true);
+        } else {
+          performExitKiosk();
+        }
+      }
+    };
     window.addEventListener('keydown', escape);
     return () => window.removeEventListener('keydown', escape);
-  }, []);
+  }, [isKioskMode, tvConfig.kioskPin]);
 
-  const toggleKioskMode = async () => {
-    if (isKioskMode) {
-      if (document.fullscreenElement) await document.exitFullscreen?.();
-      setIsKioskMode(false);
-      setShowKioskSettings(false);
-      return;
-    }
-
+  const enterKioskMode = async () => {
+    soundService.playSuccess();
     try {
       if (document.documentElement.requestFullscreen) {
         await document.documentElement.requestFullscreen();
-        setIsKioskMode(true);
-      } else {
-        setIsKioskMode(true);
       }
-    } catch {
-      setIsKioskMode(true);
-    }
+    } catch { /* Fullscreen may be rejected in certain iframes */ }
+    setIsKioskMode(true);
+    setCurrentPage(0);
+    setRotationSecondsLeft(tvConfig.rotationSeconds);
   };
 
-  useEffect(() => {
-    if (!isKioskMode || !tvConfig.rotateCategories || rotationCategoryIds.length === 0) return;
+  const performExitKiosk = async () => {
+    soundService.playSuccess();
+    if (document.fullscreenElement) {
+      try {
+        await document.exitFullscreen?.();
+      } catch { /* ignore */ }
+    }
+    setIsKioskMode(false);
+    setShowKioskSettings(false);
+    setShowExitPinModal(false);
+  };
 
-    setSelectedCategory((current) => (
-      rotationCategoryIds.includes(current) ? current : rotationCategoryIds[0]
-    ));
-
-    const rotation = window.setInterval(() => {
-      setSelectedCategory((current) => {
-        const currentIndex = rotationCategoryIds.indexOf(current);
-        return rotationCategoryIds[(currentIndex + 1) % rotationCategoryIds.length];
-      });
-    }, Math.max(5, tvConfig.rotationSeconds) * 1000);
-    return () => window.clearInterval(rotation);
-  }, [isKioskMode, rotationCategoryKey, tvConfig.rotateCategories, tvConfig.rotationSeconds]);
+  const handleConfirmExitPin = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (tvConfig.kioskPin && exitPinInput !== tvConfig.kioskPin) {
+      soundService.playError();
+      setExitPinError('Onjuiste Kiosk-PIN. Probeer opnieuw.');
+      return;
+    }
+    performExitKiosk();
+  };
 
   const toggleRotationCategory = (categoryId: string) => {
     setTvConfig((current) => {
@@ -192,6 +236,55 @@ export const LiveLeaderboardView: React.FC<LiveLeaderboardViewProps> = ({
     return true;
   });
 
+  // Status statistics for live indicators
+  const finishedCount = results.filter((r) => r.status === 'FINISHED').length;
+  const onCourseCount = results.filter((r) => r.status === 'STARTED').length;
+  const onRangeCount = results.filter((r) => r.status === 'STARTED' && r.shootingRounds.length > 0 && r.shootingRounds.length < 2).length;
+  const waitingCount = results.filter((r) => r.status === 'REGISTERED' || r.status === 'READY' || r.status === 'CHECKED_IN').length;
+
+  // Pagination for large categories in kiosk mode
+  const effectivePageSize = isKioskMode && tvConfig.pageSize > 0 ? tvConfig.pageSize : filteredResults.length || 1;
+  const totalPages = Math.max(1, Math.ceil(filteredResults.length / effectivePageSize));
+  const safeCurrentPage = Math.min(currentPage, totalPages - 1);
+  const displayedResults = isKioskMode && tvConfig.pageSize > 0
+    ? filteredResults.slice(safeCurrentPage * effectivePageSize, (safeCurrentPage + 1) * effectivePageSize)
+    : filteredResults;
+
+  useEffect(() => {
+    setCurrentPage(0);
+  }, [selectedCategory, selectedWave, selectedGender, activeProfile]);
+
+  // Combined Category Rotation & Pagination Timer
+  useEffect(() => {
+    if (!isKioskMode || !tvConfig.rotateCategories || rotationCategoryIds.length === 0) return;
+
+    setSelectedCategory((current) => (
+      rotationCategoryIds.includes(current) ? current : rotationCategoryIds[0]
+    ));
+
+    const timer = window.setInterval(() => {
+      if (isRotationPaused) return;
+
+      setRotationSecondsLeft((prev) => {
+        if (prev <= 1) {
+          if (tvConfig.autoPaginate && totalPages > 1 && safeCurrentPage < totalPages - 1) {
+            setCurrentPage((p) => p + 1);
+          } else {
+            setCurrentPage(0);
+            setSelectedCategory((current) => {
+              const currentIndex = rotationCategoryIds.indexOf(current);
+              return rotationCategoryIds[(currentIndex + 1) % rotationCategoryIds.length];
+            });
+          }
+          return tvConfig.rotationSeconds;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [isKioskMode, rotationCategoryKey, tvConfig.rotateCategories, tvConfig.rotationSeconds, isRotationPaused, totalPages, safeCurrentPage, tvConfig.autoPaginate]);
+
   // Search and status only hide rows; category, wave and gender define the ranking.
   const ranked = results.filter(r => r.raceProfileId === activeProfile && r.rankOverall !== undefined &&
     (selectedCategory === 'ALL' || r.categoryId === selectedCategory) &&
@@ -224,10 +317,54 @@ export const LiveLeaderboardView: React.FC<LiveLeaderboardViewProps> = ({
   };
 
   return (
-    <div data-text-scale={isKioskMode ? tvConfig.textScale : undefined} className={`space-y-6 text-xs ${isKioskMode ? 'leaderboard-kiosk p-3 sm:p-6 bg-slate-950 min-h-screen' : ''}`}>
+    <div
+      data-text-scale={isKioskMode ? tvConfig.textScale : undefined}
+      data-theme={isKioskMode ? tvConfig.theme : undefined}
+      className={`space-y-5 text-xs ${
+        isKioskMode
+          ? `leaderboard-kiosk p-3 sm:p-6 min-h-screen ${
+              tvConfig.theme === 'daylight' ? 'bg-white text-slate-950' : 'bg-slate-950 text-white'
+            }`
+          : ''
+      }`}
+    >
+      {/* Kiosk Mode Status Summary Bar */}
+      {isKioskMode && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+          <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-sm">🏁</div>
+            <div>
+              <div className="text-[10px] text-slate-400 uppercase font-semibold">Gefinisht</div>
+              <div className="text-base font-black text-white font-mono">{finishedCount}</div>
+            </div>
+          </div>
+          <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold text-sm">🏃</div>
+            <div>
+              <div className="text-[10px] text-slate-400 uppercase font-semibold">Op Parcours</div>
+              <div className="text-base font-black text-white font-mono">{onCourseCount}</div>
+            </div>
+          </div>
+          <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-sm">🎯</div>
+            <div>
+              <div className="text-[10px] text-slate-400 uppercase font-semibold">Schietstand</div>
+              <div className="text-base font-black text-white font-mono">{onRangeCount}</div>
+            </div>
+          </div>
+          <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-slate-800 text-slate-400 flex items-center justify-center font-bold text-sm">⏱️</div>
+            <div>
+              <div className="text-[10px] text-slate-400 uppercase font-semibold">Wacht op Start</div>
+              <div className="text-base font-black text-white font-mono">{waitingCount}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Top Banner & TV Kiosk Mode Toggle */}
       <div className={isKioskMode
-        ? 'flex flex-wrap items-center justify-between gap-3'
+        ? 'flex flex-wrap items-center justify-between gap-3 bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-lg'
         : 'bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-wrap items-center justify-between gap-4'}>
         {!isKioskMode && <div>
           <div className="flex items-center gap-2 mb-1">
@@ -255,73 +392,246 @@ export const LiveLeaderboardView: React.FC<LiveLeaderboardViewProps> = ({
               : `Realtime updates tijdens de race: actieve lopers op parcours, live schietbeurten en virtuele tussenstanden`}
           </p>
         </div>}
-        {isKioskMode && <p className="text-lg text-amber-300 font-bold">{profileOptions.find(([id]) => id === activeProfile)?.[1]} · {selectedCategory === 'ALL' ? 'Alle leeftijdscategorieën' : categories.find(c => c.id === selectedCategory)?.name}</p>}
+
+        {isKioskMode && (
+          <div className="flex items-center gap-3">
+            <Trophy className="w-5 h-5 text-amber-400" />
+            <div>
+              <p className="text-sm font-bold text-amber-300">
+                {profileOptions.find(([id]) => id === activeProfile)?.[1]} · {selectedCategory === 'ALL' ? 'Alle categorieën' : categories.find(c => c.id === selectedCategory)?.name}
+              </p>
+              <h2 className="text-lg font-black text-white">{event?.name || 'Biathlon Klassement'}</h2>
+            </div>
+          </div>
+        )}
 
         <div className="flex items-center gap-2.5">
-          {!isKioskMode && <button
-            onClick={handleExportCsv}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 text-xs font-medium transition"
-          >
-            <Download className="w-4 h-4" /> CSV Export
-          </button>}
+          {isKioskMode && tvConfig.showClock && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800/80 border border-slate-700 text-amber-300 font-mono font-bold text-sm">
+              <Clock className="w-4 h-4" />
+              <span>{currentTime.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+            </div>
+          )}
+
+          {isKioskMode && (
+            <button
+              type="button"
+              onClick={() => {
+                const nextTheme = tvConfig.theme === 'daylight' ? 'dark' : 'daylight';
+                setTvConfig({ ...tvConfig, theme: nextTheme });
+                soundService.playSuccess();
+              }}
+              title={tvConfig.theme === 'daylight' ? 'Schakel naar Donkere Modus' : 'Schakel naar Zonlicht / Daglicht Modus'}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 text-xs font-bold transition"
+            >
+              {tvConfig.theme === 'daylight' ? <Moon className="w-4 h-4 text-indigo-400" /> : <Sun className="w-4 h-4 text-amber-400" />}
+              <span className="hidden sm:inline">{tvConfig.theme === 'daylight' ? 'Nacht' : 'Zonlicht'}</span>
+            </button>
+          )}
+
+          {!isKioskMode && (
+            <button
+              onClick={handleExportCsv}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 text-xs font-medium transition"
+            >
+              <Download className="w-4 h-4" /> CSV Export
+            </button>
+          )}
+
           {isKioskMode && (
             <button
               type="button"
               aria-expanded={showKioskSettings}
               aria-controls="kiosk-settings"
               onClick={() => setShowKioskSettings((current) => !current)}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-slate-800 text-slate-200 hover:bg-slate-700 border border-slate-700 text-xs font-bold transition"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 text-slate-200 hover:bg-slate-700 border border-slate-700 text-xs font-bold transition"
             >
               <Settings className="w-4 h-4" />
-              <span>Instellingen</span>
+              <span className="hidden sm:inline">Opties</span>
             </button>
           )}
-          <button
-            onClick={toggleKioskMode}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition ${
-              isKioskMode
-                ? 'bg-amber-500 text-slate-950'
-                : 'bg-slate-800 text-slate-200 hover:bg-slate-750 border border-slate-700'
-            }`}
-          >
-            <Tv className="w-4 h-4" />
-            <span>{isKioskMode ? 'Kiosk verlaten' : 'TV Kiosk Modus'}</span>
-          </button>
+
+          {!isKioskMode ? (
+            <button
+              onClick={enterKioskMode}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold bg-slate-800 text-slate-200 hover:bg-slate-750 border border-slate-700 transition"
+            >
+              <Tv className="w-4 h-4 text-amber-400" />
+              <span>TV Kiosk Modus</span>
+            </button>
+          ) : tvConfig.kioskPin && tvConfig.kioskPin.trim() ? (
+            <button
+              onClick={() => {
+                setExitPinInput('');
+                setExitPinError(null);
+                setShowExitPinModal(true);
+              }}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-black bg-amber-500 hover:bg-amber-400 text-slate-950 shadow transition"
+            >
+              <Lock className="w-4 h-4" />
+              <span>Kiosk Verlaten</span>
+            </button>
+          ) : (
+            <SafeConfirmButton
+              mode="hold"
+              holdDurationSeconds={3}
+              variant="warning"
+              onConfirm={performExitKiosk}
+              className="py-1.5 px-3 text-xs font-black shadow"
+            >
+              <Unlock className="w-4 h-4" />
+              <span>Houd 3s: Sluit Kiosk</span>
+            </SafeConfirmButton>
+          )}
         </div>
       </div>
 
+      {/* Rotation Progress & Controls in Kiosk Mode */}
+      {isKioskMode && tvConfig.rotateCategories && (
+        <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-2.5 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setIsRotationPaused(!isRotationPaused)}
+            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+            title={isRotationPaused ? 'Hervat automatische rotatie' : 'Pauzeer automatische rotatie'}
+          >
+            {isRotationPaused ? <Play className="w-3.5 h-3.5 text-amber-400" /> : <Pause className="w-3.5 h-3.5 text-slate-400" />}
+          </button>
+          <div className="flex-1 space-y-1">
+            <div className="flex items-center justify-between text-[11px] text-slate-400">
+              <span className="font-semibold text-slate-300">
+                Rotatie: {categories.find(c => c.id === selectedCategory)?.name || 'Alle Categorieën'}
+                {totalPages > 1 && ` (Pagina ${safeCurrentPage + 1}/${totalPages})`}
+              </span>
+              <span className="font-mono text-amber-400 font-bold">
+                {isRotationPaused ? 'Gepauzeerd' : `${rotationSecondsLeft}s`}
+              </span>
+            </div>
+            <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-1000 ease-linear ${
+                  isRotationPaused ? 'bg-slate-600' : 'bg-amber-400'
+                }`}
+                style={{
+                  width: isRotationPaused
+                    ? '100%'
+                    : `${((tvConfig.rotationSeconds - rotationSecondsLeft) / tvConfig.rotationSeconds) * 100}%`,
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Settings Drawer in Kiosk Mode */}
       {isKioskMode && showKioskSettings && (
-        <div id="kiosk-settings" className="bg-slate-900 border border-amber-500/40 rounded-xl p-4 space-y-4 text-xs">
-          <div className="flex flex-wrap items-center gap-4">
-          <label className="flex items-center gap-2 text-slate-200">
-            <input type="checkbox" checked={tvConfig.showPodium} onChange={(event) => setTvConfig({ ...tvConfig, showPodium: event.target.checked })} />
-            Podium tonen
-          </label>
-          <label className="flex items-center gap-2 text-slate-200">
-            <input type="checkbox" checked={tvConfig.showClock} onChange={(event) => setTvConfig({ ...tvConfig, showClock: event.target.checked })} />
-            Klok tonen
-          </label>
-          <label className="flex items-center gap-2 text-slate-200">
-            <input type="checkbox" checked={tvConfig.rotateCategories} onChange={(event) => setTvConfig({ ...tvConfig, rotateCategories: event.target.checked })} />
-            Categorieën roteren
-          </label>
-          <label className="flex items-center gap-2 text-slate-200">
-            Interval
-            <select value={tvConfig.rotationSeconds} onChange={(event) => setTvConfig({ ...tvConfig, rotationSeconds: Number(event.target.value) })} className="bg-slate-800 border border-slate-700 rounded px-2 py-1">
-              <option value={10}>10 sec.</option>
-              <option value={15}>15 sec.</option>
-              <option value={30}>30 sec.</option>
-              <option value={60}>60 sec.</option>
-            </select>
-          </label>
-          <label className="flex items-center gap-2 text-slate-200">
-            Tekstgrootte
-            <select aria-label="Tekstgrootte" value={tvConfig.textScale} onChange={(event) => setTvConfig({ ...tvConfig, textScale: event.target.value as TvKioskConfig['textScale'] })} className="bg-slate-800 border border-slate-700 rounded px-2 py-1">
-              <option value="normal">Normaal</option>
-              <option value="large">Groot</option>
-              <option value="extra-large">Extra groot</option>
-            </select>
-          </label>
+        <div id="kiosk-settings" className="bg-slate-900 border border-amber-500/40 rounded-2xl p-5 space-y-4 text-xs shadow-2xl">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <h3 className="font-bold text-white text-sm flex items-center gap-2">
+              <Settings className="w-4 h-4 text-amber-400" /> Kiosk- en TV-Instellingen
+            </h3>
+            <button
+              onClick={() => setShowKioskSettings(false)}
+              className="text-slate-400 hover:text-white font-bold"
+            >
+              ✕ Sluiten
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+            <label className="flex items-center gap-2 text-slate-200">
+              <input
+                type="checkbox"
+                checked={tvConfig.theme === 'daylight'}
+                onChange={(event) => setTvConfig({ ...tvConfig, theme: event.target.checked ? 'daylight' : 'dark' })}
+              />
+              <span className="font-medium">☀️ High-Contrast Zonlicht / Daglicht</span>
+            </label>
+
+            <label className="flex items-center gap-2 text-slate-200">
+              <input
+                type="checkbox"
+                checked={tvConfig.showPodium}
+                onChange={(event) => setTvConfig({ ...tvConfig, showPodium: event.target.checked })}
+              />
+              <span>Top-3 Podium tonen</span>
+            </label>
+
+            <label className="flex items-center gap-2 text-slate-200">
+              <input
+                type="checkbox"
+                checked={tvConfig.showClock}
+                onChange={(event) => setTvConfig({ ...tvConfig, showClock: event.target.checked })}
+              />
+              <span>Live Klok tonen</span>
+            </label>
+
+            <label className="flex items-center gap-2 text-slate-200">
+              <input
+                type="checkbox"
+                checked={tvConfig.rotateCategories}
+                onChange={(event) => setTvConfig({ ...tvConfig, rotateCategories: event.target.checked })}
+              />
+              <span>Categorieën roteren</span>
+            </label>
+
+            <div className="space-y-1">
+              <span className="text-slate-300 block">Rotatie Interval:</span>
+              <select
+                value={tvConfig.rotationSeconds}
+                onChange={(event) => setTvConfig({ ...tvConfig, rotationSeconds: Number(event.target.value) })}
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white"
+              >
+                <option value={10}>10 seconden</option>
+                <option value={15}>15 seconden</option>
+                <option value={20}>20 seconden</option>
+                <option value={30}>30 seconden</option>
+                <option value={60}>60 seconden</option>
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <span className="text-slate-300 block">TV Typografie & Schaalgrootte:</span>
+              <select
+                value={tvConfig.textScale}
+                onChange={(event) => setTvConfig({ ...tvConfig, textScale: event.target.value as TvKioskConfig['textScale'] })}
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white"
+              >
+                <option value="normal">Normaal (Desktop/Tablet)</option>
+                <option value="large">Groot (TV 3-5 meter)</option>
+                <option value="extra-large">Extra Groot (TV 5-8 meter)</option>
+                <option value="jumbo-tv">Grote TV / Kiosk (10+ meter afstand)</option>
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <span className="text-slate-300 block">Paginering bij grote groepen:</span>
+              <select
+                value={tvConfig.pageSize}
+                onChange={(event) => setTvConfig({ ...tvConfig, pageSize: Number(event.target.value) })}
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white"
+              >
+                <option value={8}>8 atleten per pagina</option>
+                <option value={12}>12 atleten per pagina</option>
+                <option value={16}>16 atleten per pagina</option>
+                <option value={20}>20 atleten per pagina</option>
+                <option value={0}>Alle atleten ineens (geen paging)</option>
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <span className="text-slate-300 flex items-center gap-1">
+                <Shield className="w-3.5 h-3.5 text-amber-400" /> Kiosk PIN-vergrendeling (optioneel):
+              </span>
+              <input
+                type="text"
+                maxLength={6}
+                value={tvConfig.kioskPin || ''}
+                onChange={(e) => setTvConfig({ ...tvConfig, kioskPin: e.target.value })}
+                placeholder="bv. 1234 (leeg = 3s hold)"
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono placeholder:text-slate-500"
+              />
+            </div>
           </div>
 
           <fieldset className="border-t border-slate-800 pt-3">
@@ -347,15 +657,7 @@ export const LiveLeaderboardView: React.FC<LiveLeaderboardViewProps> = ({
                 </label>
               ))}
             </div>
-            {categories.length === 0 && <p className="text-slate-500">Er zijn nog geen categorieën ingesteld.</p>}
           </fieldset>
-        </div>
-      )}
-
-      {isKioskMode && tvConfig.showClock && (
-        <div className="flex items-center justify-end gap-2 text-amber-300 font-mono font-bold text-lg">
-          <Clock className="w-5 h-5" />
-          {currentTime.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
         </div>
       )}
 
@@ -567,14 +869,14 @@ export const LiveLeaderboardView: React.FC<LiveLeaderboardViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
-              {filteredResults.length === 0 ? (
+              {displayedResults.length === 0 ? (
                 <tr>
                   <td colSpan={11} className="py-8 text-center text-slate-500 italic">
                     Geen deelnemers gevonden die aan de filters voldoen.
                   </td>
                 </tr>
               ) : (
-                filteredResults.map((r) => {
+                displayedResults.map((r) => {
                   const isFinished = r.status === 'FINISHED';
 
                   return (
@@ -689,7 +991,101 @@ export const LiveLeaderboardView: React.FC<LiveLeaderboardViewProps> = ({
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Navigation */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between px-4 py-3 bg-slate-900 border-t border-slate-800 rounded-b-2xl">
+            <div className="text-xs text-slate-400 font-mono">
+              Weergave {safeCurrentPage * effectivePageSize + 1} - {Math.min((safeCurrentPage + 1) * effectivePageSize, filteredResults.length)} van {filteredResults.length} deelnemers
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={safeCurrentPage === 0}
+                onClick={() => {
+                  setCurrentPage((p) => Math.max(0, p - 1));
+                  soundService.playSuccess();
+                }}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-200 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 font-medium transition"
+              >
+                <ChevronLeft className="w-4 h-4" /> Vorige
+              </button>
+              <span className="text-xs text-amber-300 font-bold px-2 font-mono">
+                Pagina {safeCurrentPage + 1} van {totalPages}
+              </span>
+              <button
+                type="button"
+                disabled={safeCurrentPage >= totalPages - 1}
+                onClick={() => {
+                  setCurrentPage((p) => Math.min(totalPages - 1, p + 1));
+                  soundService.playSuccess();
+                }}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-200 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 font-medium transition"
+              >
+                Volgende <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Exit Kiosk PIN Modal */}
+      {showExitPinModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-sm w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-amber-500/20 text-amber-400 rounded-xl">
+                <KeyRound className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">Kiosk-PIN Vereist</h3>
+                <p className="text-xs text-slate-400">Voer de Kiosk-PIN in om de TV-presentatie te ontgrendelen.</p>
+              </div>
+            </div>
+
+            <form onSubmit={handleConfirmExitPin} className="space-y-4">
+              <input
+                type="password"
+                autoFocus
+                inputMode="numeric"
+                maxLength={6}
+                value={exitPinInput}
+                onChange={(e) => {
+                  setExitPinInput(e.target.value);
+                  setExitPinError(null);
+                }}
+                placeholder="PIN invoeren..."
+                className="w-full text-center text-2xl tracking-[0.5em] font-mono py-3 rounded-xl bg-slate-950 border border-slate-700 text-white focus:border-amber-500 focus:outline-none"
+              />
+
+              {exitPinError && (
+                <p className="text-xs text-red-400 font-semibold text-center flex items-center justify-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5" /> {exitPinError}
+                </p>
+              )}
+
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowExitPinModal(false);
+                    setExitPinError(null);
+                  }}
+                  className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs transition"
+                >
+                  Annuleren
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow transition"
+                >
+                  Ontgrendelen
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

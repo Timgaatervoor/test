@@ -8,11 +8,13 @@ import {
   Zap,
   Activity,
   ShieldCheck,
+  AlertTriangle,
 } from 'lucide-react';
 import { runFailsafeTestSuite, type TestResult } from '../../services/failsafeTests';
 import { simulateRace } from '../../services/simulatorService';
 import { initializeSampleData } from '../../services/sampleDataService';
 import { soundService } from '../../services/soundService';
+import { SafeConfirmButton } from '../SafeConfirmButton';
 
 interface SimulatorViewProps {
   onRefresh: () => void;
@@ -26,12 +28,13 @@ export const SimulatorView: React.FC<SimulatorViewProps> = ({ onRefresh }) => {
   const [simStep, setSimStep] = useState<string>('');
   const [simPercent, setSimPercent] = useState<number>(0);
   const [simSuccess, setSimSuccess] = useState(false);
-
   const [isResetting, setIsResetting] = useState(false);
+  const [noticeMessage, setNoticeMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const handleRunTests = async () => {
     setIsRunningTests(true);
     setTestResults([]);
+    setNoticeMessage(null);
     try {
       const results = await runFailsafeTestSuite();
       setTestResults(results);
@@ -39,7 +42,8 @@ export const SimulatorView: React.FC<SimulatorViewProps> = ({ onRefresh }) => {
       if (allPassed) soundService.playSuccess();
       else soundService.playWarning();
     } catch (err: any) {
-      alert(`Fout bij uitvoeren failsafe tests: ${err?.message}`);
+      soundService.playError();
+      setNoticeMessage({ type: 'error', text: `Fout bij uitvoeren failsafe tests: ${err?.message}` });
     } finally {
       setIsRunningTests(false);
     }
@@ -48,6 +52,7 @@ export const SimulatorView: React.FC<SimulatorViewProps> = ({ onRefresh }) => {
   const handleSimulateRace = async () => {
     setIsSimulating(true);
     setSimSuccess(false);
+    setNoticeMessage(null);
     try {
       await simulateRace((step, percent) => {
         setSimStep(step);
@@ -57,26 +62,24 @@ export const SimulatorView: React.FC<SimulatorViewProps> = ({ onRefresh }) => {
       soundService.playSuccess();
       onRefresh();
     } catch (err: any) {
-      alert(`Fout bij simulatie: ${err?.message}`);
+      soundService.playError();
+      setNoticeMessage({ type: 'error', text: `Fout bij simulatie: ${err?.message}` });
     } finally {
       setIsSimulating(false);
     }
   };
 
   const handleResetSampleData = async () => {
-    const confirmed = confirm(
-      'Weet u zeker dat u alle gegevens wilt resetten naar de standaard testset (200 Belgische atleten, 10 waves, 3 profielen)?'
-    );
-    if (!confirmed) return;
-
     setIsResetting(true);
+    setNoticeMessage(null);
     try {
       await initializeSampleData(true);
       soundService.playSuccess();
       onRefresh();
-      alert('Testgegevens succesvol geïnitialiseerd!');
+      setNoticeMessage({ type: 'success', text: 'Testgegevens succesvol geïnitialiseerd (200 atleten, 10 waves)!' });
     } catch (err: any) {
-      alert(`Fout bij resetten: ${err?.message}`);
+      soundService.playError();
+      setNoticeMessage({ type: 'error', text: `Fout bij resetten: ${err?.message}` });
     } finally {
       setIsResetting(false);
     }
@@ -101,15 +104,44 @@ export const SimulatorView: React.FC<SimulatorViewProps> = ({ onRefresh }) => {
         </div>
 
         <div className="flex items-center gap-2.5">
-          <button
-            onClick={handleResetSampleData}
+          <SafeConfirmButton
+            mode="hold"
+            holdDurationSeconds={3}
+            variant="warning"
+            onConfirm={handleResetSampleData}
             disabled={isResetting || isSimulating}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 border border-slate-700 text-xs font-semibold transition"
+            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold"
           >
-            <RotateCcw className="w-4 h-4" /> Reset Testdata (200 Atleten)
-          </button>
+            <RotateCcw className="w-4 h-4" />
+            <span>{isResetting ? 'Bezig met reset...' : 'Houd vast (3s): Reset Testdata'}</span>
+          </SafeConfirmButton>
         </div>
       </div>
+
+      {noticeMessage && (
+        <div
+          className={`p-4 rounded-xl border text-xs flex items-center justify-between gap-3 ${
+            noticeMessage.type === 'success'
+              ? 'bg-emerald-950/60 border-emerald-800/60 text-emerald-300'
+              : 'bg-red-950/60 border-red-800/60 text-red-200'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {noticeMessage.type === 'success' ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+            ) : (
+              <AlertTriangle className="w-5 h-5 text-red-400 shrink-0" />
+            )}
+            <span>{noticeMessage.text}</span>
+          </div>
+          <button
+            onClick={() => setNoticeMessage(null)}
+            className="font-bold opacity-70 hover:opacity-100"
+          >
+            Sluiten
+          </button>
+        </div>
+      )}
 
       {/* Grid: Race Simulator & Automated Test Suite */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">

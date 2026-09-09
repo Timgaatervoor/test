@@ -23,6 +23,8 @@ import {
   type RecoveryValidation,
 } from '../../services/backupService';
 import { InstallDesktopModal } from '../InstallDesktopModal';
+import { soundService } from '../../services/soundService';
+import { SafeConfirmButton } from '../SafeConfirmButton';
 
 interface BackupRecoveryViewProps {
   event: RaceEvent | null;
@@ -40,18 +42,22 @@ export const BackupRecoveryView: React.FC<BackupRecoveryViewProps> = ({
   const [restoreSuccess, setRestoreSuccess] = useState(false);
   const [restoreIdentityWarning, setRestoreIdentityWarning] = useState(false);
   const [showInstallModal, setShowInstallModal] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleCreateSnapshot = async () => {
     if (!event) return;
     setIsCreatingSnapshot(true);
+    setActionError(null);
     try {
       const snap = await createFullSnapshot(event);
       setCreatedSnapshot(snap);
       downloadJsonFile(snap, `biathlon_backup_${event.name.replace(/\s+/g, '_')}_${Date.now()}.json`);
+      soundService.playSuccess();
     } catch (err: any) {
-      alert(`Fout bij maken back-up: ${err?.message}`);
+      soundService.playError();
+      setActionError(`Fout bij maken back-up: ${err?.message}`);
     } finally {
       setIsCreatingSnapshot(false);
     }
@@ -60,35 +66,34 @@ export const BackupRecoveryView: React.FC<BackupRecoveryViewProps> = ({
   const handleSelectRecoveryFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setActionError(null);
 
     try {
       const text = await file.text();
       const validation = await validateRecoveryFile(text);
       setValidationResult(validation);
       setRestoreSuccess(false);
+      soundService.playSuccess();
     } catch (err: any) {
-      alert(`Fout bij lezen bestand: ${err?.message}`);
+      soundService.playError();
+      setActionError(`Fout bij lezen bestand: ${err?.message}`);
     }
   };
 
   const handleConfirmRestore = async () => {
     if (!validationResult || !validationResult.snapshot) return;
-
-    const confirmed = confirm(
-      `WEET U HET ZEKER?\n\nU staat op het punt om de huidige lokale database volledig te vervangen door back-up snapshot "${validationResult.snapshot.snapshotId}".\n\nEr worden ${validationResult.eventDetails?.participantsCount} deelnemers en ${validationResult.eventDetails?.timingRecordsCount} tijdrecords hersteld.`
-    );
-
-    if (!confirmed) return;
-
     setIsRestoring(true);
+    setActionError(null);
     try {
       await restoreSnapshot(validationResult.snapshot);
+      soundService.playSuccess();
       setRestoreSuccess(true);
       setRestoreIdentityWarning(true);
       setValidationResult(null);
       onRefresh();
     } catch (err: any) {
-      alert(`Fout bij herstellen: ${err?.message}`);
+      soundService.playError();
+      setActionError(`Fout bij herstellen: ${err?.message}`);
     } finally {
       setIsRestoring(false);
     }
@@ -119,6 +124,21 @@ export const BackupRecoveryView: React.FC<BackupRecoveryViewProps> = ({
           <span>{isCreatingSnapshot ? 'Bezig met snapshot...' : 'Volledige Back-up Downloaden'}</span>
         </button>
       </div>
+
+      {actionError && (
+        <div className="p-4 rounded-xl bg-red-950/60 border border-red-800/60 text-red-200 text-xs flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5 text-red-400 shrink-0" />
+            <span>{actionError}</span>
+          </div>
+          <button
+            onClick={() => setActionError(null)}
+            className="text-red-400 hover:text-white font-bold text-xs"
+          >
+            Sluiten
+          </button>
+        </div>
+      )}
 
       {/* Local Standalone & Desktop Program Execution Banner */}
       <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-amber-950/30 border border-amber-500/30 rounded-2xl p-6 shadow-xl space-y-4">
@@ -313,13 +333,20 @@ export const BackupRecoveryView: React.FC<BackupRecoveryViewProps> = ({
                   >
                     Annuleren
                   </button>
-                  <button
-                    onClick={handleConfirmRestore}
+                  <SafeConfirmButton
+                    mode="hold"
+                    holdDurationSeconds={3}
+                    requireTypeConfirm={true}
+                    typeConfirmKeyword="BEVESTIG"
+                    typeConfirmTitle="Database herstellen bevestigen"
+                    typeConfirmDescription={`U staat op het punt de huidige database te overschrijven met snapshot "${validationResult.snapshot.snapshotId}". Er worden ${validationResult.eventDetails?.participantsCount ?? 0} deelnemers hersteld. Typ BEVESTIG om uit te voeren.`}
+                    variant="danger"
+                    onConfirm={handleConfirmRestore}
                     disabled={isRestoring}
-                    className="px-6 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white font-bold shadow-lg"
+                    className="px-6 py-2 rounded-lg font-bold shadow-lg"
                   >
-                    {isRestoring ? 'Herstellen...' : 'Ja, Database Nu Herstellen'}
-                  </button>
+                    {isRestoring ? 'Herstellen...' : 'Houd vast (3s) om te herstellen'}
+                  </SafeConfirmButton>
                 </div>
               </div>
             ) : (

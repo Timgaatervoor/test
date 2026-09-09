@@ -69,6 +69,7 @@ export const ShootingStationView: React.FC<ShootingStationViewProps> = ({
   const [editingResult, setEditingResult] = useState<ShootingResult | null>(null);
   const [editHits, setEditHits] = useState(5);
   const [editReason, setEditReason] = useState('');
+  const [editError, setEditError] = useState<string | null>(null);
 
   // Duplicate conflict state (Req 21)
   const [duplicateConflict, setDuplicateConflict] = useState<{
@@ -229,7 +230,8 @@ export const ShootingStationView: React.FC<ShootingStationViewProps> = ({
   const handleResolveConflictCorrection = async () => {
     if (!duplicateConflict) return;
     if (!duplicateConflict.reason.trim()) {
-      alert('Een reden van correctie is verplicht (Req 21 & 44)');
+      soundService.playWarning();
+      setFeedback({ text: 'Een reden van correctie is verplicht (Req 21 & 44)', type: 'warn' });
       return;
     }
 
@@ -283,7 +285,8 @@ export const ShootingStationView: React.FC<ShootingStationViewProps> = ({
   const handleSaveCorrection = async () => {
     if (!editingResult) return;
     if (!editReason.trim()) {
-      alert('Een reden van correctie is verplicht (Req 44)');
+      soundService.playWarning();
+      setEditError('Een reden van correctie is verplicht (Req 44)');
       return;
     }
 
@@ -305,8 +308,10 @@ export const ShootingStationView: React.FC<ShootingStationViewProps> = ({
       );
     }
 
+    soundService.playSuccess();
     setEditingResult(null);
     setEditReason('');
+    setEditError(null);
     onRefresh();
   };
 
@@ -668,6 +673,11 @@ export const ShootingStationView: React.FC<ShootingStationViewProps> = ({
               <span className="font-bold text-white block">
                 Correctie voor Bib #{editingResult.bibNumber} (Ronde {editingResult.round})
               </span>
+              {editError && (
+                <div className="p-2 rounded bg-red-950/60 border border-red-800/60 text-red-300 font-semibold">
+                  {editError}
+                </div>
+              )}
               <div>
                 <label className="text-slate-300 block mb-1">Gewijzigde Treffers (0-{editingResult.shots}):</label>
                 <div className="flex gap-2">

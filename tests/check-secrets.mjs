@@ -10,8 +10,25 @@ const patterns = [
 ];
 const failures = [];
 const check = (label, content) => { if (patterns.some(p => p.test(content))) failures.push(label); };
-const git = (...args) => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-const files = git('ls-files', '--cached', '--others', '--exclude-standard').split(/\r?\n/).filter(Boolean);
+const git = (...args) => {
+  try {
+    return execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  } catch {
+    return '';
+  }
+};
+let files = git('ls-files', '--cached', '--others', '--exclude-standard').split(/\r?\n/).filter(Boolean);
+if (!files.length) {
+  function walk(dir) {
+    for (const name of readdirSync(dir)) {
+      if (name === 'node_modules' || name === '.git' || name === 'dist') continue;
+      const full = join(dir, name);
+      if (statSync(full).isDirectory()) walk(full);
+      else files.push(full);
+    }
+  }
+  walk('.');
+}
 for (const file of files) {
   if (/\.(?:ts|tsx|js|mjs|json|toml|md|ya?ml)$/.test(file)) check(file, readFileSync(file, 'utf8'));
 }

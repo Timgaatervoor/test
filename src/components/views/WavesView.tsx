@@ -18,6 +18,7 @@ import { generateUUID, operationService } from '../../services/operationService'
 import { WavePlanningPanel } from '../WavePlanningPanel';
 import { defaultWaveSettings, nextWaveTime, timeSeconds, waveAllows, type WaveSettings } from '../../services/wavePlanning';
 import { soundService } from '../../services/soundService';
+import { SafeConfirmButton } from '../SafeConfirmButton';
 
 interface WavesViewProps {
   waves: Wave[];
@@ -108,10 +109,6 @@ export const WavesView: React.FC<WavesViewProps> = ({
   };
 
   const handleDeleteWave = async (w: Wave) => {
-    if (!confirm(`Weet u zeker dat u "${w.name}" wilt verwijderen? Gekoppelde deelnemers blijven behouden maar worden ontkoppeld van deze wave.`)) {
-      return;
-    }
-
     await db.transaction('rw', db.waves, db.participants, async () => {
       await db.waves.delete(w.id);
       await db.participants.where('waveId').equals(w.id).modify({ waveId: undefined });
@@ -122,7 +119,7 @@ export const WavesView: React.FC<WavesViewProps> = ({
       `Wave "${w.name}" (#${w.waveNumber}) verwijderd`
     );
 
-    soundService.playWarning();
+    soundService.playSuccess();
     onRefresh();
   };
 
@@ -266,13 +263,16 @@ export const WavesView: React.FC<WavesViewProps> = ({
                     >
                       <Edit2 className="w-3.5 h-3.5" />
                     </button>
-                    <button
-                      onClick={() => handleDeleteWave(w)}
-                      className="p-1.5 rounded-lg bg-red-950/40 hover:bg-red-900/60 text-red-400 hover:text-red-200 border border-red-800/40 transition"
-                      title="Wave verwijderen"
+                    <SafeConfirmButton
+                      mode="hold"
+                      holdDurationSeconds={3}
+                      variant="danger"
+                      onConfirm={() => handleDeleteWave(w)}
+                      className="p-1.5"
+                      title="Houd 3 seconden vast om deze wave te verwijderen"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    </SafeConfirmButton>
                   </div>
                 </div>
 
@@ -475,17 +475,21 @@ export const WavesView: React.FC<WavesViewProps> = ({
               </div>
 
               <div className="flex justify-between items-center gap-2 pt-4 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => {
+                <SafeConfirmButton
+                  mode="hold"
+                  holdDurationSeconds={3}
+                  variant="danger"
+                  onConfirm={async () => {
                     const w = editingWave;
-                    setEditingWave(null);
-                    handleDeleteWave(w);
+                    if (w) {
+                      setEditingWave(null);
+                      await handleDeleteWave(w);
+                    }
                   }}
-                  className="px-3 py-2 rounded-xl bg-red-950/40 hover:bg-red-900/60 text-red-400 border border-red-800/40 text-xs font-bold flex items-center gap-1.5"
+                  className="px-3 py-2 flex items-center gap-1.5"
                 >
-                  <Trash2 className="w-3.5 h-3.5" /> Verwijderen
-                </button>
+                  <Trash2 className="w-3.5 h-3.5" /> Houd vast om te wissen
+                </SafeConfirmButton>
 
                 <div className="flex gap-2">
                   <button

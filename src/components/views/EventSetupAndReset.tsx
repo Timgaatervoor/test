@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Trash2, RefreshCw, AlertTriangle, ShieldAlert, Database } from 'lucide-react';
+import { Trash2, RefreshCw, AlertTriangle, ShieldAlert, Database, CheckCircle2 } from 'lucide-react';
 import type { RaceEvent, Wave, Participant } from '../../types';
 import {
   clearAllParticipants,
@@ -9,6 +9,7 @@ import {
   initializeSampleData,
 } from '../../services/sampleDataService';
 import { soundService } from '../../services/soundService';
+import { SafeConfirmButton } from '../SafeConfirmButton';
 
 interface EventSetupAndResetProps {
   event: RaceEvent | null;
@@ -27,50 +28,74 @@ export const EventSetupAndReset: React.FC<EventSetupAndResetProps> = ({
   const [blankName, setBlankName] = useState('');
   const [blankDate, setBlankDate] = useState('');
   const [blankLocation, setBlankLocation] = useState('');
+  const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'warning' } | null>(null);
+
+  const showNotification = (text: string, type: 'success' | 'warning' = 'success') => {
+    setStatusMessage({ text, type });
+    setTimeout(() => setStatusMessage(null), 5000);
+  };
 
   const handleResetTimingOnly = async () => {
-    if (!confirm('Weet u zeker dat u ALLE start-, schiet- en finishtijden wilt resetten?\n\nDeelnemers en startgroepen blijven behouden.')) return;
     await resetTimingAndShooting();
     soundService.playSuccess();
     await onRefresh();
-    alert('Alle tijdregistraties en schietresultaten zijn gereset.');
+    showNotification('Alle tijdregistraties en schietresultaten zijn succesvol gereset.');
   };
 
   const handleClearParticipants = async () => {
-    if (!confirm('OPGELET: alle deelnemers worden definitief gewist. Wilt u doorgaan?')) return;
     await clearAllParticipants();
     soundService.playWarning();
     await onRefresh();
-    alert('Alle deelnemers zijn gewist.');
+    showNotification('Alle deelnemers zijn definitief gewist.', 'warning');
   };
 
   const handleClearWaves = async () => {
-    if (!confirm('OPGELET: alle startgroepen worden gewist en deelnemers worden ervan losgekoppeld. Wilt u doorgaan?')) return;
     await clearAllWaves();
     soundService.playWarning();
     await onRefresh();
-    alert('Alle startgroepen zijn gewist.');
+    showNotification('Alle startgroepen zijn gewist.', 'warning');
   };
 
-  const handleFactoryResetBlank = async (formEvent: React.FormEvent) => {
-    formEvent.preventDefault();
+  const handleFactoryResetBlank = async (formEvent?: React.FormEvent) => {
+    formEvent?.preventDefault?.();
+    if (!blankName.trim()) {
+      soundService.playWarning();
+      return;
+    }
     await resetToBlankEvent(blankName.trim(), blankDate, blankLocation.trim());
     soundService.playWarning();
     setShowBlankEventModal(false);
     await onRefresh();
-    alert(`Het systeem is gewist en klaargezet voor "${blankName}".`);
+    showNotification(`Het systeem is volledig gewist en klaargezet voor "${blankName}".`, 'warning');
   };
 
   const handleRestoreSampleData = async () => {
-    if (!confirm('Wilt u de voorbeeldgegevens herstellen? De huidige gegevens worden volledig vervangen.')) return;
     await initializeSampleData(true);
     soundService.playSuccess();
     await onRefresh();
-    alert('De voorbeeldgegevens zijn hersteld.');
+    showNotification('De voorbeeldgegevens zijn hersteld.');
   };
 
   return (
     <div className="space-y-6">
+      {statusMessage && (
+        <div
+          role="status"
+          className={`p-3.5 rounded-xl border flex items-center gap-2.5 text-xs font-semibold shadow-lg ${
+            statusMessage.type === 'success'
+              ? 'bg-emerald-950/70 border-emerald-500/50 text-emerald-200'
+              : 'bg-amber-950/70 border-amber-500/50 text-amber-200'
+          }`}
+        >
+          {statusMessage.type === 'success' ? (
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          ) : (
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+          )}
+          <span>{statusMessage.text}</span>
+        </div>
+      )}
+
       <div className="rounded-2xl border border-red-500/30 bg-slate-900 p-6 shadow-xl space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
           <div>
@@ -79,7 +104,7 @@ export const EventSetupAndReset: React.FC<EventSetupAndResetProps> = ({
             </span>
             <h3 className="text-xl font-black text-white mt-0.5">Evenement wissen of opnieuw beginnen</h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              Beheer deelnemers en startgroepen in hun eigen schermen. Hier staan alleen ingrijpende resetacties.
+              Beheer deelnemers en startgroepen in hun eigen schermen. Gevaarlijke acties vereisen 3 seconden hold-to-confirm ter bescherming.
             </p>
           </div>
           <span className="text-xs font-mono text-slate-400 bg-slate-950 px-3 py-1 rounded-lg border border-slate-800">
@@ -97,9 +122,15 @@ export const EventSetupAndReset: React.FC<EventSetupAndResetProps> = ({
                 Wist start-, schiet- en finishtijden. Deelnemers en startgroepen blijven behouden.
               </p>
             </div>
-            <button type="button" onClick={handleResetTimingOnly} className="w-full py-2 px-3 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold transition">
-              Tijden resetten
-            </button>
+            <SafeConfirmButton
+              mode="hold"
+              holdDurationSeconds={3}
+              variant="warning"
+              onConfirm={handleResetTimingOnly}
+              className="w-full"
+            >
+              Houd vast: Tijden resetten
+            </SafeConfirmButton>
           </div>
 
           <div className="bg-slate-950/60 border border-slate-800 p-4 rounded-xl flex flex-col justify-between gap-3">
@@ -111,9 +142,15 @@ export const EventSetupAndReset: React.FC<EventSetupAndResetProps> = ({
                 Maakt de deelnemerslijst volledig leeg. Gebruik het scherm Deelnemers om nieuwe gegevens te importeren.
               </p>
             </div>
-            <button type="button" onClick={handleClearParticipants} className="w-full py-2 px-3 rounded-lg bg-red-950/40 hover:bg-red-900/60 text-red-300 border border-red-800/40 text-xs font-bold transition">
-              Wis {participants.length} deelnemers
-            </button>
+            <SafeConfirmButton
+              mode="hold"
+              holdDurationSeconds={3}
+              variant="danger"
+              onConfirm={handleClearParticipants}
+              className="w-full"
+            >
+              Houd vast: Wis {participants.length} deelnemers
+            </SafeConfirmButton>
           </div>
 
           <div className="bg-slate-950/60 border border-slate-800 p-4 rounded-xl flex flex-col justify-between gap-3">
@@ -125,9 +162,15 @@ export const EventSetupAndReset: React.FC<EventSetupAndResetProps> = ({
                 Wist alle startgroepen. Deelnemers blijven bewaard maar worden losgekoppeld.
               </p>
             </div>
-            <button type="button" onClick={handleClearWaves} className="w-full py-2 px-3 rounded-lg bg-red-950/40 hover:bg-red-900/60 text-red-300 border border-red-800/40 text-xs font-bold transition">
-              Wis {waves.length} startgroepen
-            </button>
+            <SafeConfirmButton
+              mode="hold"
+              holdDurationSeconds={3}
+              variant="danger"
+              onConfirm={handleClearWaves}
+              className="w-full"
+            >
+              Houd vast: Wis {waves.length} startgroepen
+            </SafeConfirmButton>
           </div>
 
           <div className="bg-slate-950/60 border border-slate-800 p-4 rounded-xl flex flex-col justify-between gap-3">
@@ -139,7 +182,11 @@ export const EventSetupAndReset: React.FC<EventSetupAndResetProps> = ({
                 Wist alle wedstrijdgegevens en logs. Maakt een blanco evenement met een nieuw ID; online synchronisatie wordt uitgezet.
               </p>
             </div>
-            <button type="button" onClick={() => setShowBlankEventModal(true)} className="w-full py-2 px-3 rounded-lg bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-500/40 text-xs font-bold transition">
+            <button
+              type="button"
+              onClick={() => setShowBlankEventModal(true)}
+              className="w-full py-2 px-3 rounded-lg bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-500/40 text-xs font-bold transition"
+            >
               Blanco evenement starten
             </button>
           </div>
@@ -154,42 +201,91 @@ export const EventSetupAndReset: React.FC<EventSetupAndResetProps> = ({
                 <p className="text-[11px] text-slate-400">Vervang de huidige gegevens door de volledige demonstratieset.</p>
               </div>
             </div>
-            <button type="button" onClick={handleRestoreSampleData} className="px-4 py-2 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold">
-              Voorbeeldgegevens herstellen
-            </button>
+            <SafeConfirmButton
+              mode="hold"
+              holdDurationSeconds={3}
+              variant="warning"
+              onConfirm={handleRestoreSampleData}
+            >
+              Houd vast: Voorbeeld herstellen
+            </SafeConfirmButton>
           </div>
         )}
       </div>
 
       {showBlankEventModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 text-xs">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-fadeIn">
+          <div className="bg-slate-900 border-2 border-red-500/60 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 text-xs">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <Database className="w-4 h-4 text-emerald-400" /> Nieuw blanco evenement
+                <Database className="w-4 h-4 text-emerald-400" /> Fabrieksreset & Nieuw blanco evenement
               </h3>
             </div>
             <p className="text-slate-300 leading-relaxed">
-              Alle deelnemers, startgroepen, tijden en logs worden gewist. Het nieuwe evenement krijgt een eigen ID en online synchronisatie wordt uitgezet. Maak vooraf een back-up als u deze gegevens wilt bewaren.
+              Alle deelnemers, startgroepen, tijden en logs worden definitief gewist. Het nieuwe evenement krijgt een eigen ID en online synchronisatie wordt uitgezet.
             </p>
-            <form onSubmit={handleFactoryResetBlank} className="space-y-3">
+            <form onSubmit={(e) => e.preventDefault()} className="space-y-3">
               <div>
                 <label className="text-slate-300 font-semibold block mb-1">Wedstrijdnaam:</label>
-                <input type="text" required value={blankName} onChange={(event) => setBlankName(event.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold text-sm" />
+                <input
+                  type="text"
+                  required
+                  value={blankName}
+                  onChange={(event) => setBlankName(event.target.value)}
+                  placeholder="Bijv. Biathlon Cup 2026"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold text-sm focus:outline-none focus:border-amber-500"
+                />
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="text-slate-300 font-semibold block mb-1">Datum:</label>
-                  <input type="date" required value={blankDate} onChange={(event) => setBlankDate(event.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono" />
+                  <input
+                    type="date"
+                    required
+                    value={blankDate}
+                    onChange={(event) => setBlankDate(event.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-amber-500"
+                  />
                 </div>
                 <div>
                   <label className="text-slate-300 font-semibold block mb-1">Locatie:</label>
-                  <input type="text" required value={blankLocation} onChange={(event) => setBlankLocation(event.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white" />
+                  <input
+                    type="text"
+                    required
+                    value={blankLocation}
+                    onChange={(event) => setBlankLocation(event.target.value)}
+                    placeholder="Bijv. De Haan"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                  />
                 </div>
               </div>
-              <div className="flex justify-end gap-2 pt-4 border-t border-slate-800">
-                <button type="button" onClick={() => setShowBlankEventModal(false)} className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 font-semibold">Annuleren</button>
-                <button type="submit" className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold uppercase tracking-wider">Alles wissen en starten</button>
+
+              <div className="pt-2 border-t border-slate-800">
+                <p className="text-red-400 font-semibold mb-2">
+                  Houd de knop hieronder 3 seconden ingedrukt en typ vervolgens <span className="font-mono font-black">BEVESTIG</span> om deze database-lediging te voltooien.
+                </p>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowBlankEventModal(false)}
+                    className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 font-semibold hover:bg-slate-700 transition"
+                  >
+                    Annuleren
+                  </button>
+                  <SafeConfirmButton
+                    mode="hold"
+                    holdDurationSeconds={3}
+                    requireTypeConfirm={true}
+                    typeConfirmKeyword="BEVESTIG"
+                    typeConfirmTitle="Bevestig volledige fabrieksreset"
+                    typeConfirmDescription="Weet u 100% zeker dat u alle gegevens wilt wissen en opnieuw wilt beginnen?"
+                    variant="danger"
+                    disabled={!blankName.trim()}
+                    onConfirm={handleFactoryResetBlank}
+                  >
+                    Houd vast (3s) voor reset
+                  </SafeConfirmButton>
+                </div>
               </div>
             </form>
           </div>
@@ -198,3 +294,4 @@ export const EventSetupAndReset: React.FC<EventSetupAndResetProps> = ({
     </div>
   );
 };
+

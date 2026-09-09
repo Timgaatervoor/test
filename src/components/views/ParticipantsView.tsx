@@ -39,6 +39,8 @@ import {
   getDefaultCategoryProfileId,
   getProfilesForCategory,
 } from '../../services/categoryProfileService';
+import { SafeConfirmButton } from '../SafeConfirmButton';
+import { soundService } from '../../services/soundService';
 
 interface ParticipantsViewProps {
   participants: Participant[];
@@ -121,12 +123,14 @@ export const ParticipantsView: React.FC<ParticipantsViewProps> = ({
     const selectedCat = categoryMap.get(newCatId);
     const selectedProfileId = newProfileId || getDefaultCategoryProfileId(selectedCat);
     if (!selectedProfileId) {
-      alert('Kies eerst een wedstrijdprofiel voor deze deelnemer.');
+      soundService.playWarning();
+      setBibMessage('Kies eerst een wedstrijdprofiel voor deze deelnemer.');
       return;
     }
     const allowedProfileIds = getCategoryProfileIds(selectedCat);
     if (allowedProfileIds.length > 0 && !allowedProfileIds.includes(selectedProfileId)) {
-      alert('Dit wedstrijdprofiel is niet gekoppeld aan de gekozen leeftijdscategorie.');
+      soundService.playWarning();
+      setBibMessage('Dit wedstrijdprofiel is niet gekoppeld aan de gekozen leeftijdscategorie.');
       return;
     }
     const now = new Date().toISOString();
@@ -164,15 +168,19 @@ export const ParticipantsView: React.FC<ParticipantsViewProps> = ({
   };
 
   const handleClearBibs = async () => {
-    if (!confirm('Alle borstnummers van alle deelnemers verwijderen? Dit geldt ook voor deelnemers buiten het huidige lijstfilter. De deelnemers blijven behouden.')) return;
     setClearingBibs(true);
     setBibMessage('');
     try {
       const count = await updateBibs({ clear: true });
+      soundService.playSuccess();
       setBibMessage(`${count} borstnummers verwijderd.`);
       onRefresh();
-    } catch (error) { setBibMessage((error as Error).message); }
-    finally { setClearingBibs(false); }
+    } catch (error) {
+      soundService.playError();
+      setBibMessage((error as Error).message);
+    } finally {
+      setClearingBibs(false);
+    }
   };
 
   // Process uploaded file (supports CSV and multi-sheet Excel)
@@ -215,7 +223,8 @@ export const ParticipantsView: React.FC<ParticipantsViewProps> = ({
         setImportStep('mapping');
       }
     } catch (err: any) {
-      alert(`Fout bij openen bestand: ${err?.message}`);
+      soundService.playError();
+      setBibMessage(`Fout bij openen bestand: ${err?.message}`);
     }
   };
 
@@ -559,7 +568,16 @@ export const ParticipantsView: React.FC<ParticipantsViewProps> = ({
           >
             <ArrowUpDown className="w-4 h-4" /> Borstnummers per leeftijd
           </button>
-          <button disabled={clearingBibs || !participants.some(p => p.bibNumber !== undefined)} onClick={handleClearBibs} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-950 text-red-300 border border-red-800 text-xs font-semibold disabled:opacity-40"><Trash2 className="w-4 h-4" /> Alle borstnummers verwijderen</button>
+          <SafeConfirmButton
+            mode="hold"
+            holdDurationSeconds={3}
+            variant="danger"
+            disabled={clearingBibs || !participants.some(p => p.bibNumber !== undefined)}
+            onConfirm={handleClearBibs}
+            className="flex items-center gap-1.5"
+          >
+            <Trash2 className="w-4 h-4" /> Borstnummers wissen
+          </SafeConfirmButton>
           <button
             onClick={() => setShowAddModal(true)}
             className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow transition"

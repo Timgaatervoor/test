@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   Printer,
   LockOpen,
+  Activity,
 } from 'lucide-react';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { soundService } from '../services/soundService';
@@ -34,6 +35,7 @@ interface HeaderProps {
   deviceConfig: DeviceConfig | null;
   pendingSyncCount: number;
   onOpenPreRaceCheck: () => void;
+  onOpenSystemHealth: () => void;
   onOpenPrint: () => void;
   onUnlockDevice: () => void;
   isTestMode: boolean;
@@ -45,6 +47,7 @@ export const Header: React.FC<HeaderProps> = ({
   deviceConfig,
   pendingSyncCount,
   onOpenPreRaceCheck,
+  onOpenSystemHealth,
   onOpenPrint,
   onUnlockDevice,
   isTestMode,

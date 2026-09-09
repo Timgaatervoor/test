@@ -16,11 +16,14 @@ import {
   Users,
   HardDriveDownload,
   FlaskConical,
+  VolumeX,
+  Play,
 } from 'lucide-react';
 import type { RaceEvent, DeviceConfig, RaceProfile, Category, Wave, Participant, UserRole } from '../../types';
 import { db } from '../../db/dexieDb';
 import { operationService } from '../../services/operationService';
 import { soundService } from '../../services/soundService';
+import { SafeConfirmButton } from '../SafeConfirmButton';
 import { RaceProfileEditor } from './RaceProfileEditor';
 import { AgeCategoriesEditor } from './AgeCategoriesEditor';
 import { EventSetupAndReset } from './EventSetupAndReset';
@@ -68,6 +71,36 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [deviceLocked, setDeviceLocked] = useState(deviceConfig?.isLocked ?? false);
   const [devicePin, setDevicePin] = useState(deviceConfig?.pin || '');
   const [savedMessage, setSavedMessage] = useState(false);
+
+  // Audio settings
+  const [audioVolume, setAudioVolume] = useState(() => Math.round(soundService.getVolume() * 100));
+  const [audioMuted, setAudioMuted] = useState(() => soundService.isMuted());
+  const [lastTestedSound, setLastTestedSound] = useState<string | null>(null);
+
+  const handleVolumeSliderChange = (newVolPct: number) => {
+    setAudioVolume(newVolPct);
+    soundService.setVolume(newVolPct / 100);
+    if (audioMuted && newVolPct > 0) {
+      setAudioMuted(false);
+      soundService.setMuted(false);
+    }
+  };
+
+  const handleToggleAudioMute = () => {
+    const nextMute = !audioMuted;
+    setAudioMuted(nextMute);
+    soundService.setMuted(nextMute);
+  };
+
+  const handleTestAudio = async (type: 'fanfare' | 'finish' | 'hit' | 'miss' | 'warning') => {
+    await soundService.resume();
+    setLastTestedSound(type);
+    if (type === 'fanfare') soundService.playGoFanfare();
+    else if (type === 'finish') soundService.playFinishChord();
+    else if (type === 'hit') soundService.playHit();
+    else if (type === 'miss') soundService.playMiss();
+    else if (type === 'warning') soundService.playWarning();
+  };
 
   // Synchronize on initial mount without overwriting during active typing
   const initialLoadRef = React.useRef(false);
@@ -157,11 +190,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const toggleOfficialLock = async () => {
     if (!event) return;
     const nextLocked = !isLocked;
-    const promptMsg = nextLocked
-      ? 'Wilt u de officiële resultaten vergrendelen en publiceren? Wijzigingen vereisen daarna beheerderstoestemming.'
-      : 'Wilt u de officiële resultaten ontgrendelen voor correcties?';
-
-    if (!confirm(promptMsg)) return;
 
     setIsLocked(nextLocked);
     await db.events.update(event.id, {
@@ -556,6 +584,100 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
 
+        {/* Audio Feedback & Volume Controls (Web Audio API) */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow space-y-4 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+            <div className="flex items-center gap-2">
+              {audioMuted ? (
+                <VolumeX className="w-5 h-5 text-red-400" />
+              ) : (
+                <Volume2 className="w-5 h-5 text-amber-400" />
+              )}
+              <div>
+                <h3 className="text-sm font-bold text-white">Audiofeedback & Geluidssignalen (Web Audio API)</h3>
+                <p className="text-slate-400 text-[11px]">
+                  Akoestische signalen voor startfanfares, schietresultaten (treffers/missers), finishakkoorden en waarschuwingen.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleToggleAudioMute}
+              className={`px-3 py-1.5 rounded-xl border font-bold text-xs transition flex items-center gap-1.5 ${
+                audioMuted
+                  ? 'bg-red-950/60 text-red-300 border-red-800/60 hover:bg-red-900/60'
+                  : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-750'
+              }`}
+            >
+              {audioMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+              <span>{audioMuted ? 'Geluid Gedempt' : 'Geluid Actief'}</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label htmlFor="volume-slider" className="text-slate-300 font-semibold flex items-center gap-2">
+                  <span>Hoofdvolume</span>
+                  <span className="text-[11px] text-slate-500 font-normal">
+                    (gesynchroniseerd in localStorage)
+                  </span>
+                </label>
+                <span className="text-amber-400 font-mono font-bold text-sm">{audioVolume}%</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <VolumeX className="w-4 h-4 text-slate-500" />
+                <input
+                  id="volume-slider"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="5"
+                  value={audioMuted ? 0 : audioVolume}
+                  onChange={(e) => handleVolumeSliderChange(parseInt(e.target.value, 10))}
+                  className="w-full accent-amber-500 cursor-pointer h-2 bg-slate-800 rounded-lg appearance-none"
+                />
+                <Volume2 className="w-4 h-4 text-amber-400" />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <span className="text-slate-300 font-semibold block">Geluidstests</span>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleTestAudio('fanfare')}
+                  className="px-3 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold transition flex items-center gap-1.5"
+                  title="Test Startfanfare"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current" /> Test Geluidseffecten
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleTestAudio('finish')}
+                  className="px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-medium transition"
+                >
+                  Finish akkoord
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleTestAudio('hit')}
+                  className="px-2.5 py-2 rounded-xl bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-800/40 font-medium transition"
+                >
+                  Treffer (Hit)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleTestAudio('miss')}
+                  className="px-2.5 py-2 rounded-xl bg-red-950/40 hover:bg-red-900/60 text-red-300 border border-red-800/40 font-medium transition"
+                >
+                  Misser
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Results Freezing & Locking (Req 48, 59) */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow flex flex-col sm:flex-row items-center justify-between gap-4 text-xs">
           <div>
@@ -577,17 +699,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={toggleOfficialLock}
-            className={`px-5 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider transition ${
-              isLocked
-                ? 'bg-red-600 hover:bg-red-500 text-white'
-                : 'bg-emerald-600 hover:bg-emerald-500 text-white'
-            }`}
+          <SafeConfirmButton
+            mode="hold"
+            holdDurationSeconds={3}
+            variant={isLocked ? 'danger' : 'primary'}
+            onConfirm={toggleOfficialLock}
+            className="px-5 py-2.5 font-bold text-xs uppercase tracking-wider"
           >
-            {isLocked ? 'Ontgrendelen voor Wijziging' : 'Vergrendel als Officieel'}
-          </button>
+            {isLocked ? 'Houd vast (3s): Ontgrendelen' : 'Houd vast (3s): Vergrendel als Officieel'}
+          </SafeConfirmButton>
         </div>
 
         <div className="flex justify-end items-center gap-4">

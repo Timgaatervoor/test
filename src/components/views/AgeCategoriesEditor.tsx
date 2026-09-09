@@ -5,6 +5,7 @@ import { db } from '../../db/dexieDb';
 import { operationService } from '../../services/operationService';
 import { soundService } from '../../services/soundService';
 import { getCategoryProfileIds } from '../../services/categoryProfileService';
+import { SafeConfirmButton } from '../SafeConfirmButton';
 
 interface AgeCategoriesEditorProps {
   categories: Category[];
@@ -99,11 +100,11 @@ export const AgeCategoriesEditor: React.FC<AgeCategoriesEditorProps> = ({
   const handleDelete = async () => {
     if (categoryId === newCategoryId) return;
     const category = categories.find((item) => item.id === categoryId);
-    if (!category || !confirm(`Categorie "${category.name}" verwijderen? Deelnemers worden niet verwijderd.`)) return;
+    if (!category) return;
 
     await db.categories.delete(category.id);
     await operationService.logAudit('CATEGORY_DELETED', `Categorie "${category.name}" verwijderd.`);
-    soundService.playWarning();
+    soundService.playSuccess();
     resetForm();
     await onRefresh();
   };
@@ -226,9 +227,15 @@ export const AgeCategoriesEditor: React.FC<AgeCategoriesEditorProps> = ({
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 pt-4">
             <div>
               {categoryId !== newCategoryId && (
-                <button type="button" onClick={handleDelete} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-950/60 text-red-300 border border-red-800 hover:bg-red-900/60 text-xs font-bold">
-                  <Trash2 className="w-4 h-4" /> Verwijderen
-                </button>
+                <SafeConfirmButton
+                  mode="hold"
+                  holdDurationSeconds={3}
+                  variant="danger"
+                  onConfirm={handleDelete}
+                  className="flex items-center gap-2"
+                >
+                  <Trash2 className="w-4 h-4" /> Houd vast om te wissen
+                </SafeConfirmButton>
               )}
             </div>
             <button type="submit" className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider transition">

@@ -50,6 +50,10 @@ export const StartStationView: React.FC<StartStationViewProps> = ({
   const [editingRecord, setEditingRecord] = useState<{ id: string; bib: number; currentTime: string } | null>(null);
   const [editNewTime, setEditNewTime] = useState('');
   const [editReason, setEditReason] = useState('');
+  const [editError, setEditError] = useState<string | null>(null);
+  const [undoingRecord, setUndoingRecord] = useState<{ id: string; bib: number } | null>(null);
+  const [undoReason, setUndoReason] = useState('');
+  const [undoError, setUndoError] = useState<string | null>(null);
 
   const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; type: 'success' | 'warn' } | null>(null);
 
@@ -147,11 +151,13 @@ export const StartStationView: React.FC<StartStationViewProps> = ({
   const handleManualScheduledStart = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isNaN(parsedManualBib) || parsedManualBib <= 0) {
-      alert('Voer een geldig startnummer in');
+      soundService.playWarning();
+      setFeedbackMsg({ text: 'Voer een geldig startnummer in', type: 'warn' });
       return;
     }
     if (!manualTimeInput.trim()) {
-      alert('Voer een starttijd in (bijv. 09:04:30)');
+      soundService.playWarning();
+      setFeedbackMsg({ text: 'Voer een starttijd in (bijv. 09:04:30)', type: 'warn' });
       return;
     }
 
@@ -214,11 +220,13 @@ export const StartStationView: React.FC<StartStationViewProps> = ({
   const handleSaveEditStart = async () => {
     if (!editingRecord) return;
     if (!editNewTime.trim()) {
-      alert('Voer een nieuwe tijd in (bijv. 09:15:30)');
+      soundService.playWarning();
+      setEditError('Voer een nieuwe tijd in (bijv. 09:15:30)');
       return;
     }
     if (!editReason.trim()) {
-      alert('Reden van wijziging is verplicht (Req 44)');
+      soundService.playWarning();
+      setEditError('Reden van wijziging is verplicht (Req 44)');
       return;
     }
 
@@ -241,25 +249,39 @@ export const StartStationView: React.FC<StartStationViewProps> = ({
     setEditingRecord(null);
     setEditNewTime('');
     setEditReason('');
+    setEditError(null);
     onRefresh();
   };
 
-  const handleUndoStart = async (recordId: string, bibNumber: number) => {
-    const reason = prompt('Reden voor annuleren van start (verplicht):');
-    if (!reason || !reason.trim()) return;
+  const handleOpenUndoStart = (recordId: string, bibNumber: number) => {
+    setUndoingRecord({ id: recordId, bib: bibNumber });
+    setUndoReason('');
+    setUndoError(null);
+  };
 
-    await operationService.undoTimingRecord(recordId, reason);
-    const p = participants.find(item => item.bibNumber === bibNumber);
+  const handleConfirmUndoStart = async () => {
+    if (!undoingRecord) return;
+    if (!undoReason.trim()) {
+      soundService.playWarning();
+      setUndoError('Reden voor annuleren van start is verplicht.');
+      return;
+    }
+
+    await operationService.undoTimingRecord(undoingRecord.id, undoReason.trim());
+    const p = participants.find((item) => item.bibNumber === undoingRecord.bib);
 
     await operationService.logAudit(
       'START_CANCELLED',
-      `Start voor bib #${bibNumber} geannuleerd. Reden: ${reason}`,
+      `Start voor bib #${undoingRecord.bib} geannuleerd. Reden: ${undoReason.trim()}`,
       p?.id,
-      bibNumber,
-      reason
+      undoingRecord.bib,
+      undoReason.trim()
     );
 
     soundService.playWarning();
+    setUndoingRecord(null);
+    setUndoReason('');
+    setUndoError(null);
     onRefresh();
   };
 
@@ -633,7 +655,7 @@ export const StartStationView: React.FC<StartStationViewProps> = ({
                       </button>
 
                       <button
-                        onClick={() => handleUndoStart(rec.id, rec.bibNumber)}
+                        onClick={() => handleOpenUndoStart(rec.id, rec.bibNumber)}
                         className="flex items-center gap-1 px-2 py-1 rounded bg-slate-700 hover:bg-red-950/60 text-slate-300 hover:text-red-300 border border-slate-600 hover:border-red-600/50 transition text-[11px] font-medium"
                         title="Annuleer deze startregistratie met reden"
                       >
@@ -656,6 +678,12 @@ export const StartStationView: React.FC<StartStationViewProps> = ({
             <p className="text-xs text-slate-400">
               Huidig geregistreerd startuur: <strong className="text-white font-mono">{formatLocalTime(editingRecord.currentTime, true)}</strong>
             </p>
+
+            {editError && (
+              <div className="p-2.5 rounded-lg bg-red-950/60 border border-red-800/60 text-red-300 text-xs font-semibold">
+                {editError}
+              </div>
+            )}
 
             <div>
               <label className="text-xs text-slate-300 block mb-1">Nieuwe starttijd (UU:MM:SS):</label>
@@ -684,7 +712,10 @@ export const StartStationView: React.FC<StartStationViewProps> = ({
             <div className="flex gap-2 pt-2">
               <button
                 type="button"
-                onClick={() => setEditingRecord(null)}
+                onClick={() => {
+                  setEditingRecord(null);
+                  setEditError(null);
+                }}
                 className="flex-1 py-2 rounded-xl bg-slate-800 text-slate-400 text-xs font-bold"
               >
                 Annuleren
@@ -695,6 +726,58 @@ export const StartStationView: React.FC<StartStationViewProps> = ({
                 className="flex-1 py-2 rounded-xl bg-emerald-500 text-slate-950 text-xs font-black"
               >
                 Opslaan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Undo Start Record Modal */}
+      {undoingRecord && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-slate-750 rounded-2xl p-6 max-w-sm w-full space-y-4 text-white shadow-2xl">
+            <h3 className="text-base font-bold text-amber-400">Startregistratie Annuleren (Undo)</h3>
+            <p className="text-xs text-slate-300">
+              U staat op het punt de startregistratie voor <strong className="text-white">Bib #{undoingRecord.bib}</strong> te annuleren.
+            </p>
+
+            {undoError && (
+              <div className="p-2.5 rounded-lg bg-red-950/60 border border-red-800/60 text-red-300 text-xs font-semibold">
+                {undoError}
+              </div>
+            )}
+
+            <div>
+              <label className="text-xs text-slate-300 block mb-1">
+                Verplichte reden van annulering:
+              </label>
+              <input
+                type="text"
+                autoFocus
+                value={undoReason}
+                onChange={(e) => setUndoReason(e.target.value)}
+                placeholder="bv. Valse start / per ongeluk ingevoerd"
+                className="w-full bg-slate-850 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
+              />
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setUndoingRecord(null);
+                  setUndoError(null);
+                }}
+                className="flex-1 py-2 rounded-xl bg-slate-800 text-slate-400 text-xs font-bold"
+              >
+                Annuleren
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmUndoStart}
+                className="flex-1 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold"
+              >
+                Bevestig Annulering
               </button>
             </div>
           </div>
