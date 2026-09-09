@@ -7,7 +7,10 @@ import {stamhoofdLocalPlugin} from './server/stamhoofdLocal';
 
 export default defineConfig(() => {
   const repositoryName = process.env.GITHUB_REPOSITORY?.split('/')[1];
-  const base = process.env.GITHUB_ACTIONS && repositoryName ? `/${repositoryName}/` : '/';
+  const isUserPage = repositoryName && repositoryName.endsWith('.github.io');
+  let base = process.env.BASE_PATH || (process.env.GITHUB_ACTIONS && repositoryName && !isUserPage ? `/${repositoryName}/` : '/');
+  if (!base.endsWith('/')) base += '/';
+  if (!base.startsWith('/')) base = `/${base}`;
 
   return {
     base,
